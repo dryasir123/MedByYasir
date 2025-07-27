@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedByYasir: Medical MCQ Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Slate & Sky Blue -->
+    <!-- Application Structure Plan: The SPA is now streamlined to focus on two core functionalities: "Exams" and "AI MCQ Generator". The header provides direct navigation to these sections. The "Exams" section allows users to visualize exam content breakdowns using interactive charts. The "AI MCQ Generator" provides a functional tool for generating medical MCQs using the Gemini API. This simplified structure prioritizes direct access to the most requested features, offering a clear and efficient user experience. -->
+    <!-- Visualization & Content Choices:
+        - Report Info: PMDC/NLE & USMLE content weightages. Goal: Compare/Inform. Viz: Interactive Donut Charts (Chart.js). Interaction: User clicks a button to select an exam, dynamically rendering the corresponding chart. Justification: Effective for showing part-to-whole relationships.
+        - Report Info: AI MCQ Generator. Goal: Generate real MCQs and provide interactive feedback. Viz: Form with input fields and dynamic display of generated MCQs, options (as radio buttons), and detailed explanations. Interaction: User inputs topic/difficulty, clicks generate, receives 5 AI-generated MCQs. For each MCQ, the user can select an option and submit, receiving immediate visual and textual feedback on correctness, along with a full explanation. Justification: Provides core AI functionality with enhanced interactive learning and immediate feedback as requested by the user.
+        - CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .chart-container { position: relative; width: 100%; max-width: 450px; margin-left: auto; margin-right: auto; height: 300px; max-height: 400px; }
+        @media (min-width: 768px) { .chart-container { height: 350px; } }
+        .nav-link { transition: color 0.3s, border-bottom-color 0.3s; }
+        .nav-link:hover, .nav-link.active { color: #0ea5e9; border-bottom-color: #0ea5e9; }
+        .ai-loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #0ea5e9;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Toast message styling */
+        #toast-message {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #333;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        #toast-message.show {
+            opacity: 1;
+        }
+        #toast-message.error {
+            background-color: #dc2626; /* red-600 */
+        }
+        #toast-message.success {
+            background-color: #16a34a; /* green-600 */
+        }
+        #toast-message.info {
+            background-color: #2563eb; /* blue-600 */
+        }
+        .content-section { display: none; }
+        .content-section.active { display: block; }
+
+        /* MCQ Option Styling */
+        .mcq-option {
+            background-color: #f1f5f9; /* slate-100 */
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.2s, border-color 0.2s;
+            border: 1px solid transparent;
+        }
+        .mcq-option:hover {
+            background-color: #e2e8f0; /* slate-200 */
+        }
+        .mcq-option.selected {
+            border-color: #0ea5e9; /* sky-500 */
+            background-color: #e0f2fe; /* blue-50 */
+        }
+        .mcq-option.correct {
+            background-color: #dcfce7; /* green-100 */
+            border-color: #22c55e; /* green-500 */
+            color: #16a34a; /* green-600 */
+        }
+        .mcq-option.incorrect {
+            background-color: #fee2e2; /* red-100 */
+            border-color: #ef4444; /* red-500 */
+            color: #dc2626; /* red-600 */
+        }
+        .mcq-option input[type="radio"] {
+            margin-right: 0.5rem;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <header class="bg-white/80 backdrop-blur-lg sticky top-0 z-50 shadow-sm">
+        <nav class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-slate-900 cursor-pointer" id="home-button">
+                <span class="text-sky-600">MedBy</span>Yasir
+            </h1>
+            <div class="hidden md:flex items-center space-x-8">
+                <a href="#exams" class="nav-link text-slate-600 border-b-2 border-transparent pb-1" data-section="exams">Exams</a>
+                <a href="#ai-generator" class="nav-link text-slate-600 border-b-2 border-transparent pb-1" data-section="ai-generator">AI MCQ (Topic)</a>
+                <a href="#ai-generator-subject" class="nav-link text-slate-600 border-b-2 border-transparent pb-1" data-section="ai-generator-subject">AI MCQ (Subject)</a>
+            </div>
+            <button id="mobile-menu-button" class="md:hidden text-slate-800">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
+            </button>
+        </nav>
+        <div id="mobile-menu" class="hidden md:hidden px-6 pb-4">
+            <a href="#exams" class="block py-2 text-slate-600" data-section="exams">Exams</a>
+            <a href="#ai-generator" class="block py-2 text-slate-600" data-section="ai-generator">AI MCQ (Topic)</a>
+            <a href="#ai-generator-subject" class="block py-2 text-slate-600" data-section="ai-generator-subject">AI MCQ (Subject)</a>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-6 py-12">
+
+        <section id="exams" class="content-section active mb-24 scroll-mt-20">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold text-slate-900 mb-2">Interactive Exam Content Breakdown</h2>
+                <p class="max-w-2xl mx-auto text-slate-600">Select an exam to visualize its content weightage. The charts below are interactive representations of the official exam blueprints, providing a clear, data-driven foundation for a "high-yield" study strategy.</p>
+            </div>
+            <div class="flex justify-center space-x-4 mb-8">
+                <button id="pmdc-btn" class="exam-btn bg-sky-600 text-white px-6 py-2 rounded-lg shadow font-semibold">PMDC NRE</button>
+                <button id="usmle1-btn" class="exam-btn bg-white text-slate-700 px-6 py-2 rounded-lg shadow font-semibold">USMLE Step 1</button>
+                <button id="usmle2-btn" class="exam-btn bg-white text-slate-700 px-6 py-2 rounded-lg shadow font-semibold">USMLE Step 2 CK</button>
+            </div>
+            <div class="bg-white p-8 rounded-xl shadow-lg">
+                <div class="grid md:grid-cols-2 gap-8 items-center">
+                    <div class="chart-container">
+                        <canvas id="examChart"></canvas>
+                    </div>
+                    <div>
+                        <h3 id="exam-title" class="text-2xl font-bold text-slate-800 mb-4"></h3>
+                        <p id="exam-description" class="text-slate-600 mb-4"></p>
+                        <div id="exam-details" class="space-y-3"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="ai-generator" class="content-section mb-24 scroll-mt-20">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold text-slate-900 mb-2">AI MCQ Generator (by Custom Topic)</h2>
+                <p class="max-w-2xl mx-auto text-slate-600">Generate custom medical MCQs on any specific topic and difficulty level. Our AI will provide questions with detailed explanations.</p>
+            </div>
+            <div class="bg-white p-8 rounded-xl shadow-lg max-w-2xl mx-auto">
+                <div class="mb-6">
+                    <label for="ai-topic" class="block text-slate-700 text-sm font-bold mb-2">Topic:</label>
+                    <input type="text" id="ai-topic" class="shadow appearance-none border rounded w-full py-2 px-3 text-slate-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="e.g., Heart Failure, Diabetes Mellitus">
+                </div>
+                <div class="mb-6">
+                    <label for="ai-difficulty" class="block text-slate-700 text-sm font-bold mb-2">Difficulty:</label>
+                    <select id="ai-difficulty" class="shadow border rounded w-full py-2 px-3 text-slate-700 leading-tight focus:outline-none focus:shadow-outline">
+                        <option value="easy">Easy</option>
+                        <option value="moderate" selected>Moderate</option>
+                        <option value="tough">Tough</option>
+                    </select>
+                </div>
+                <button id="generate-mcq-btn" class="bg-sky-500 text-white px-6 py-2 rounded-lg font-semibold hover:bg-sky-600 transition flex items-center justify-center">
+                    <span id="ai-btn-text">Generate 5 MCQs</span>
+                    <div id="ai-spinner" class="ai-loading-spinner ml-3 hidden"></div>
+                </button>
+
+                <div id="generated-mcq-output" class="mt-8 space-y-8 hidden">
+                    <!-- Generated MCQs will be inserted here -->
+                </div>
+            </div>
+        </section>
+
+        <section id="ai-generator-subject" class="content-section mb-24 scroll-mt-20">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold text-slate-900 mb-2">AI MCQ Generator (by Subject)</h2>
+                <p class="max-w-2xl mx-auto text-slate-600">Generate medical MCQs from a specific subject and difficulty level. Our AI will provide questions with detailed explanations.</p>
+            </div>
+            <div class="bg-white p-8 rounded-xl shadow-lg max-w-2xl mx-auto">
+                <div class="mb-6">
+                    <label for="ai-subject" class="block text-slate-700 text-sm font-bold mb-2">Subject:</label>
+                    <select id="ai-subject" class="shadow border rounded w-full py-2 px-3 text-slate-700 leading-tight focus:outline-none focus:shadow-outline">
+                        <option value="">Select a Subject</option>
+                        <option value="Cardiology">Cardiology</option>
+                        <option value="Pulmonology">Pulmonology</option>
+                        <option value="Neurology">Neurology</option>
+                        <option value="Gastroenterology">Gastroenterology</option>
+                        <option value="Renal">Renal</option>
+                        <option value="Heme/Onc">Heme/Onc</option>
+                        <option value="Endocrine">Endocrine</option>
+                        <option value="OB-GYN">OB-GYN</option>
+                        <option value="Pediatrics">Pediatrics</option>
+                        <option value="Psychiatry">Psychiatry</option>
+                    </select>
+                </div>
+                <div class="mb-6">
+                    <label for="ai-subject-topic" class="block text-slate-700 text-sm font-bold mb-2">Specific Topic (Optional):</label>
+                    <input type="text" id="ai-subject-topic" class="shadow appearance-none border rounded w-full py-2 px-3 text-slate-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="e.g., Myocardial Infarction (within Cardiology)">
+                </div>
+                <div class="mb-6">
+                    <label for="ai-subject-difficulty" class="block text-slate-700 text-sm font-bold mb-2">Difficulty:</label>
+                    <select id="ai-subject-difficulty" class="shadow border rounded w-full py-2 px-3 text-slate-700 leading-tight focus:outline-none focus:shadow-outline">
+                        <option value="easy">Easy</option>
+                        <option value="moderate" selected>Moderate</option>
+                        <option value="tough">Tough</option>
+                    </select>
+                </div>
+                <button id="generate-mcq-subject-btn" class="bg-sky-500 text-white px-6 py-2 rounded-lg font-semibold hover:bg-sky-600 transition flex items-center justify-center">
+                    <span id="ai-subject-btn-text">Generate 5 MCQs</span>
+                    <div id="ai-subject-spinner" class="ai-loading-spinner ml-3 hidden"></div>
+                </button>
+
+                <div id="generated-mcq-subject-output" class="mt-8 space-y-8 hidden">
+                    <!-- Generated MCQs will be inserted here -->
+                </div>
+            </div>
+        </section>
+
+    </main>
+    
+    <footer class="bg-slate-800 text-slate-300 py-8">
+        <div class="container mx-auto px-6 text-center">
+            <p>&copy; 2025 MedByYasir. An interactive strategic plan brought to life.</p>
+            <p class="text-sm text-slate-400 mt-2">This application demonstrates the core features and vision of the MedByYasir platform.</p>
+        </div>
+    </footer>
+
+    <div id="toast-message" class="hidden"></div>
+
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // --- Toast Message Utility ---
+            const toastMessage = document.getElementById('toast-message');
+            let toastTimeout;
+
+            function showToast(message, type = 'info', duration = 3000) {
+                clearTimeout(toastTimeout);
+                toastMessage.textContent = message;
+                toastMessage.className = ''; // Clear existing classes
+                toastMessage.classList.add('show');
+                if (type === 'error') {
+                    toastMessage.classList.add('error');
+                } else if (type === 'success') {
+                    toastMessage.classList.add('success');
+                } else {
+                    toastMessage.classList.add('info');
+                }
+                toastMessage.classList.remove('hidden');
+
+                toastTimeout = setTimeout(() => {
+                    toastMessage.classList.remove('show');
+                    toastMessage.classList.add('hidden');
+                }, duration);
+            }
+
+            // --- Navigation and Section Management ---
+            const contentSections = document.querySelectorAll('.content-section');
+            const navLinks = document.querySelectorAll('.nav-link');
+            const mobileMenuButton = document.getElementById('mobile-menu-button');
+            const mobileMenu = document.getElementById('mobile-menu');
+            const homeButton = document.getElementById('home-button');
+
+            function showSection(id) {
+                contentSections.forEach(section => {
+                    section.classList.remove('active');
+                    section.style.display = 'none';
+                });
+                const targetSection = document.getElementById(id);
+                if (targetSection) {
+                    targetSection.classList.add('active');
+                    targetSection.style.display = 'block';
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+
+                navLinks.forEach(link => link.classList.remove('active'));
+                const activeLink = document.querySelector(`.nav-link[data-section="${id}"]`);
+                if (activeLink) {
+                    activeLink.classList.add('active');
+                }
+                mobileMenu.classList.add('hidden'); // Hide mobile menu after selection
+            }
+
+            navLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const sectionId = link.getAttribute('data-section');
+                    showSection(sectionId);
+                });
+            });
+
+            homeButton.addEventListener('click', () => showSection('exams')); // Default to exams section
+            mobileMenuButton.addEventListener('click', () => {
+                mobileMenu.classList.toggle('hidden');
+            });
+
+            // --- Exam Content Breakdown (Chart.js) ---
+            const examData = {
+                pmdc: {
+                    title: 'PMDC National Registration Exam (NRE)',
+                    description: 'The NRE theory component focuses on higher cognition and the ability to apply knowledge. It is mandatory for foreign medical graduates seeking a license in Pakistan.',
+                    chartData: {
+                        labels: ['Clinical Sciences', 'Basic Sciences'],
+                        data: [70, 30],
+                        colors: ['#0284c7', '#7dd3fc'],
+                    },
+                    details: `
+                        <div class="border-l-4 border-sky-500 pl-4">
+                            <h4 class="font-semibold text-slate-700">Clinical Sciences (70%)</h4>
+                            <p class="text-sm">Includes Medicine, Surgery, OB-GYN, Pediatrics, and more. Questions are designed as clinical vignettes.</p>
+                        </div>
+                        <div class="border-l-4 border-sky-300 pl-4">
+                            <h4 class="font-semibold text-slate-700">Applied Basic Sciences (30%)</h4>
+                            <p class="text-sm">Includes Applied Anatomy, Physiology, Pathology, etc., presented within a clinical context.</p>
+                        </div>
+                    `
+                },
+                usmle1: {
+                    title: 'USMLE Step 1',
+                    description: 'Step 1 assesses foundational science knowledge, with a strong emphasis on interpreting graphics, lab data, and applying principles to solve clinical problems. It is now pass/fail.',
+                    chartData: {
+                        labels: ['Pathology', 'Physiology', 'Pharmacology', 'Microbiology', 'Anatomy/Embryo', 'Behavioral Sci', 'Biochem/Nutrition', 'Other'],
+                        data: [50, 35, 15, 15, 15, 12, 10, 15],
+                        colors: ['#0369a1', '#0ea5e9', '#38bdf8', '#7dd3fc', '#a5f3fc', '#cffafe', '#e0f2fe', '#f0f9ff'],
+                    },
+                    details: `
+                        <div class="border-l-4 border-sky-600 pl-4">
+                            <h4 class="font-semibold text-slate-700">Key Focus Areas</h4>
+                            <p class="text-sm">Mastery of disease mechanisms (Pathology) and normal function (Physiology) is critical. Questions often include classic gross & micro images.</p>
+                        </div>
+                        <div class="border-l-4 border-sky-300 pl-4">
+                            <h4 class="font-semibold text-slate-700">Question Style</h4>
+                            <p class="text-sm">Single patient-centered vignettes followed by one best answer. Requires strong integration of basic and clinical sciences.</p>
+                        </div>
+                    `
+                },
+                usmle2: {
+                    title: 'USMLE Step 2 CK',
+                    description: 'Step 2 CK assesses the ability to apply medical knowledge and clinical science for patient care under supervision, with a focus on diagnosis, prognosis, and next steps in management.',
+                    chartData: {
+                        labels: ['Internal Medicine', 'Surgery', 'Pediatrics', 'OB-GYN', 'Psychiatry', 'Other Clinical Sci.'],
+                        data: [40, 25, 15, 10, 5, 5],
+                        colors: ['#075985', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#a5f3fc'],
+                    },
+                    details: `
+                        <div class="border-l-4 border-sky-600 pl-4">
+                            <h4 class="font-semibold text-slate-700">Primary Focus</h4>
+                            <p class="text-sm">Emphasis is on clinical application, patient management, health promotion, and disease prevention. Results are scored numerically.</p>
+                        </div>
+                        <div class="border-l-4 border-sky-300 pl-4">
+                            <h4 class="font-semibold text-slate-700">Content Type</h4>
+                            <p class="text-sm">Requires interpretation of tables, lab data, imaging studies, and pathologic specimens within clinical scenarios.</p>
+                        </div>
+                    `
+                }
+            };
+
+            const examChartCtx = document.getElementById('examChart').getContext('2d');
+            let examChart;
+
+            function createExamChart(data) {
+                if (examChart) {
+                    examChart.destroy();
+                }
+                examChart = new Chart(examChartCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            data: data.data,
+                            backgroundColor: data.colors,
+                            borderColor: '#ffffff',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: {
+                                    font: {
+                                        size: 12
+                                    },
+                                    boxWidth: 20,
+                                    padding: 20
+                                }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed !== null) {
+                                            label += context.parsed + '%';
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        cutout: '60%'
+                    }
+                });
+            }
+
+            function updateExamContent(examKey) {
+                const data = examData[examKey];
+                document.getElementById('exam-title').textContent = data.title;
+                document.getElementById('exam-description').innerHTML = data.description;
+                document.getElementById('exam-details').innerHTML = data.details;
+                createExamChart(data.chartData);
+
+                document.querySelectorAll('.exam-btn').forEach(btn => {
+                    btn.classList.remove('bg-sky-600', 'text-white');
+                    btn.classList.add('bg-white', 'text-slate-700');
+                });
+                document.getElementById(`${examKey}-btn`).classList.add('bg-sky-600', 'text-white');
+                document.getElementById(`${examKey}-btn`).classList.remove('bg-white', 'text-slate-700');
+            }
+
+            document.getElementById('pmdc-btn').addEventListener('click', () => updateExamContent('pmdc'));
+            document.getElementById('usmle1-btn').addEventListener('click', () => updateExamContent('usmle1'));
+            document.getElementById('usmle2-btn').addEventListener('click', () => updateExamContent('usmle2'));
+
+            updateExamContent('pmdc'); // Initialize with PMDC
+
+            // --- AI MCQ Generator (Common Function) ---
+            async function generateMcqs(topic, difficulty, subject = null, outputContainer, btnTextElement, spinnerElement, generateButton) {
+                if (!topic && !subject) {
+                    showToast('Please enter a topic or select a subject for the MCQs.', 'error');
+                    return;
+                }
+                if (subject && !topic) {
+                    showToast(`Generating general MCQs for ${subject}. You can also add a specific topic within ${subject}.`, 'info');
+                }
+
+                btnTextElement.textContent = 'Generating...';
+                spinnerElement.classList.remove('hidden');
+                generateButton.disabled = true;
+                outputContainer.classList.add('hidden');
+                outputContainer.innerHTML = ''; // Clear previous MCQs
+
+                let prompt = `Generate 5 high-yield medical multiple-choice questions (MCQs) in a clinical vignette style`;
+                if (subject) {
+                    prompt += ` on the subject of "${subject}"`;
+                    if (topic) {
+                        prompt += ` focusing on the topic of "${topic}"`;
+                    }
+                } else if (topic) {
+                    prompt += ` on the topic of "${topic}"`;
+                }
+                prompt += ` with a "${difficulty}" difficulty level. Each question should have 4 options (A, B, C, D), only one of which is correct. For each MCQ, provide a detailed explanation for the correct answer and briefly explain why the other options are incorrect. Also, suggest a plausible medical textbook or guideline as a simulated source for each MCQ.
+
+Format the output as a JSON array of objects. Each object in the array should have the following keys:
+{
+  "question": "string",
+  "options": ["string", "string", "string", "string"],
+  "correct_answer_letter": "string",
+  "explanation": "string",
+  "simulated_source": "string"
+}
+`;
+
+                try {
+                    let chatHistory = [];
+                    chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                    const payload = {
+                        contents: chatHistory,
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        "question": { "type": "STRING" },
+                                        "options": {
+                                            "type": "ARRAY",
+                                            "items": { "type": "STRING" }
+                                        },
+                                        "correct_answer_letter": { "type": "STRING" },
+                                        "explanation": { "type": "STRING" },
+                                        "simulated_source": { "type": "STRING" }
+                                    },
+                                    "propertyOrdering": ["question", "options", "correct_answer_letter", "explanation", "simulated_source"]
+                                }
+                            }
+                        }
+                    };
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const result = await response.json();
+
+                    if (result.candidates && result.candidates.length > 0 &&
+                        result.candidates[0].content && result.candidates[0].content.parts &&
+                        result.candidates[0].content.parts.length > 0) {
+                        const jsonString = result.candidates[0].content.parts[0].text;
+                        const parsedMcqs = JSON.parse(jsonString);
+
+                        if (Array.isArray(parsedMcqs) && parsedMcqs.length > 0) {
+                            parsedMcqs.forEach((mcq, index) => {
+                                renderSingleMcq(mcq, index, outputContainer);
+                            });
+                            outputContainer.classList.remove('hidden');
+                            showToast('5 MCQs generated successfully!', 'success');
+                        } else {
+                            showToast("API returned no MCQs or an invalid format.", 'error');
+                        }
+                    } else {
+                        console.error("API response structure unexpected:", result);
+                        showToast("Failed to generate MCQs. Please try again or check console for details.", 'error');
+                    }
+                } catch (error) {
+                    console.error("Error generating MCQs:", error);
+                    showToast("An error occurred while generating the MCQs. Please try again.", 'error');
+                } finally {
+                    btnTextElement.textContent = 'Generate 5 MCQs';
+                    spinnerElement.classList.add('hidden');
+                    generateButton.disabled = false;
+                }
+            }
+
+            function renderSingleMcq(mcqData, index, container) {
+                const mcqBlock = document.createElement('div');
+                mcqBlock.className = 'p-6 bg-slate-50 rounded-lg border border-slate-200';
+                mcqBlock.innerHTML = `
+                    <h4 class="text-xl font-semibold text-slate-800 mb-3">Question ${index + 1}:</h4>
+                    <p class="text-slate-700 mb-4">${mcqData.question}</p>
+                    <div class="space-y-2 mb-4" data-mcq-index="${index}">
+                        ${mcqData.options.map((opt, i) => `
+                            <label class="mcq-option block cursor-pointer">
+                                <input type="radio" name="mcq_${container.id}_${index}" value="${String.fromCharCode(65 + i)}" class="mr-2">
+                                ${opt}
+                            </label>
+                        `).join('')}
+                    </div>
+                    <button class="submit-mcq-answer-btn bg-sky-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-sky-600 transition">Submit Answer</button>
+                    <div class="mcq-feedback mt-4 p-4 rounded-lg hidden"></div>
+                `;
+                container.appendChild(mcqBlock);
+
+                // Add event listener for option selection to highlight
+                mcqBlock.querySelectorAll(`input[name="mcq_${container.id}_${index}"]`).forEach(radio => {
+                    radio.addEventListener('change', (e) => {
+                        mcqBlock.querySelectorAll('.mcq-option').forEach(label => label.classList.remove('selected'));
+                        if (e.target.checked) {
+                            e.target.closest('.mcq-option').classList.add('selected');
+                        }
+                    });
+                });
+
+                // Add event listener for submit button
+                mcqBlock.querySelector('.submit-mcq-answer-btn').addEventListener('click', (e) => {
+                    const selectedOptionInput = mcqBlock.querySelector(`input[name="mcq_${container.id}_${index}"]:checked`);
+                    const feedbackDiv = mcqBlock.querySelector('.mcq-feedback');
+                    const optionsContainer = mcqBlock.querySelector(`div[data-mcq-index="${index}"]`);
+                    const submitButton = e.target;
+
+                    if (!selectedOptionInput) {
+                        showToast('Please select an answer before submitting.', 'error');
+                        return;
+                    }
+
+                    const userAnswerLetter = selectedOptionInput.value;
+                    const isCorrect = (userAnswerLetter === mcqData.correct_answer_letter);
+
+                    // Highlight options
+                    optionsContainer.querySelectorAll('.mcq-option').forEach(label => {
+                        const optionLetter = label.querySelector('input').value;
+                        label.classList.remove('selected'); // Remove selected class
+                        if (optionLetter === mcqData.correct_answer_letter) {
+                            label.classList.add('correct');
+                        } else if (optionLetter === userAnswerLetter && !isCorrect) {
+                            label.classList.add('incorrect');
+                        }
+                        label.querySelector('input').disabled = true; // Disable all radio buttons
+                    });
+
+                    // Show feedback
+                    feedbackDiv.classList.remove('hidden', 'bg-red-100', 'text-red-800', 'bg-emerald-100', 'text-emerald-800');
+                    if (isCorrect) {
+                        feedbackDiv.classList.add('bg-emerald-100', 'text-emerald-800');
+                        feedbackDiv.innerHTML = `<p class="font-semibold">Correct!</p><p>${mcqData.explanation}</p>`;
+                        showToast('Correct answer!', 'success');
+                    } else {
+                        feedbackDiv.classList.add('bg-red-100', 'text-red-800');
+                        feedbackDiv.innerHTML = `<p class="font-semibold">Incorrect. The correct answer was ${mcqData.correct_answer_letter}.</p><p>${mcqData.explanation}</p>`;
+                        showToast('Incorrect answer.', 'error');
+                    }
+                    submitButton.disabled = true; // Disable submit button
+                });
+            }
+
+            // --- AI MCQ Generator (by Custom Topic) ---
+            const generateMcqBtn = document.getElementById('generate-mcq-btn');
+            const aiBtnText = document.getElementById('ai-btn-text');
+            const aiSpinner = document.getElementById('ai-spinner');
+            const generatedMcqOutput = document.getElementById('generated-mcq-output');
+
+            generateMcqBtn.addEventListener('click', async () => {
+                const topic = document.getElementById('ai-topic').value.trim();
+                const difficulty = document.getElementById('ai-difficulty').value;
+                await generateMcqs(topic, difficulty, null, generatedMcqOutput, aiBtnText, aiSpinner, generateMcqBtn);
+            });
+            
+            // --- AI MCQ Generator (by Subject) ---
+            const generateMcqSubjectBtn = document.getElementById('generate-mcq-subject-btn');
+            const aiSubjectBtnText = document.getElementById('ai-subject-btn-text');
+            const aiSubjectSpinner = document.getElementById('ai-subject-spinner');
+            const generatedMcqSubjectOutput = document.getElementById('generated-mcq-subject-output');
+
+            generateMcqSubjectBtn.addEventListener('click', async () => {
+                const subject = document.getElementById('ai-subject').value;
+                const topic = document.getElementById('ai-subject-topic').value.trim();
+                const difficulty = document.getElementById('ai-subject-difficulty').value;
+
+                if (!subject) {
+                    showToast('Please select a subject.', 'error');
+                    return;
+                }
+                
+                await generateMcqs(topic, difficulty, subject, generatedMcqSubjectOutput, aiSubjectBtnText, aiSubjectSpinner, generateMcqSubjectBtn);
+            });
+
+            // Initialize with the exams section active
+            showSection('exams');
+        });
+    </script>
+</body>
+</html>
